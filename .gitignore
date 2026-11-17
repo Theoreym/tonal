@@ -1,0 +1,10 @@
+/target
+/dist
+/.idea
+/.vscode
+*.log
+.env
+.env.*
+!.env.example
+*.dpapi
+cookies*.txt

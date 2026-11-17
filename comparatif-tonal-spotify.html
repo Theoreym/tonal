@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tonal et Spotify — comparatif de performances</title>
+<style>
+:root{color-scheme:dark;--bg:#000;--panel:#141414;--ink:#f4f4f5;--muted:#a1a1aa;--line:#292929;--accent:#ff4444;--spotify:#d4d4d8}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:1100px;margin:auto;padding:42px 28px 60px}h1{font-size:26px;letter-spacing:-.04em;margin:0 0 8px}h2{font-size:19px;margin:0 0 8px;letter-spacing:-.02em}p{margin:0 0 12px}.muted,figcaption{color:var(--muted)}.small,figcaption{font-size:12px}.toolbar{display:flex;gap:20px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin:30px 0 20px}.buttons{display:inline-flex;gap:4px;padding:4px;background:var(--panel);border-radius:9px}button{font:inherit;font-size:13px;border:0;border-radius:6px;padding:8px 14px;background:transparent;color:var(--muted);cursor:pointer}button[aria-pressed=true]{background:#333;color:var(--ink)}button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.headline{font-size:22px;font-weight:650;letter-spacing:-.025em}.charts{display:grid;grid-template-columns:1fr 1fr;gap:32px}.chart{margin:0;padding:22px 0 16px;border-top:1px solid var(--line)}.barrow{display:grid;grid-template-columns:58px 1fr 85px;align-items:center;gap:12px;margin:22px 0}.rail{background:var(--panel);height:27px;border-radius:4px;overflow:hidden}.bar{height:100%;min-width:2px;transition:width .2s;background:var(--accent)}.bar.spotify{background:var(--spotify)}.number{font-variant-numeric:tabular-nums;text-align:right;font-size:13px;font-weight:600}.axis{margin:0 97px 12px 70px;display:flex;justify-content:space-between;color:var(--muted);font-size:11px}.explanation{margin:20px 0 28px;background:var(--panel);padding:18px 20px;border-radius:8px}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px;margin:16px 0 30px}th,td{text-align:right;padding:12px 10px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}th{color:var(--muted);font-size:12px;font-weight:500}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}.notes{border-top:1px solid var(--line);padding-top:24px}.notes p{color:var(--muted);font-size:13px}@media(max-width:740px){main{padding:26px 18px}.charts{grid-template-columns:1fr;gap:6px}h1{font-size:23px}.headline{font-size:20px}.toolbar{margin-top:24px}}@media print{.buttons{display:none}body{background:white;color:black}:root{--panel:#eee;--muted:#555;--line:#ccc;--ink:#111;--spotify:#666}main{padding:0}}
+</style>
+</head>
+<body><main>
+<header><h1>Tonal et Spotify : performances Windows</h1><p class="muted">13 novembre 2026 · <span id="versions"></span> · tous les processus des applications inclus</p><p class="muted small" id="machine"></p></header>
+<div class="toolbar"><div><div class="headline" id="headline"></div><div class="muted" id="memorySummary"></div></div><div class="buttons" aria-label="État de lecture"><button data-state="playing_hidden" aria-pressed="true">En lecture</button><button data-state="paused_hidden" aria-pressed="false">En pause</button></div></div>
+<div class="charts">
+<figure class="chart"><h2>Mémoire privée cumulée</h2><p class="muted small">Moyenne, en Mio engagés · fenêtres minimisées</p><div id="memoryBars"></div><div class="axis"><span>0</span><span id="memoryMax"></span></div><figcaption>Axe horizontal : mémoire privée (Mio). Axe vertical : application.</figcaption></figure>
+<figure class="chart"><div class="toolbar" style="margin:0 0 8px"><h2>CPU moyen cumulé</h2><div class="buttons" aria-label="Unité CPU"><button data-unit="machine" aria-pressed="true">PC entier</button><button data-unit="core" aria-pressed="false">Un cœur</button></div></div><p class="muted small" id="cpuUnit"></p><div id="cpuBars"></div><div class="axis"><span>0</span><span id="cpuMax"></span></div><figcaption>Axe horizontal : CPU (%). Axe vertical : application. Moyenne pondérée par le temps.</figcaption></figure>
+</div>
+<div class="explanation"><p><strong>Spotify est légèrement plus sobre en CPU sur ces relevés.</strong></p><p id="cpuSummary" style="margin:0"></p></div>
+<h2>Les deux relevés</h2><div class="scroll"><table><thead><tr><th>État</th><th>Application</th><th>Mémoire moyenne (min–max), Mio</th><th>CPU, % d’un cœur</th><th>CPU, % du PC</th><th>Processus</th></tr></thead><tbody id="measurements"></tbody></table></div>
+<section class="notes"><h2>Comprendre le résultat</h2><p>La mémoire et le CPU mesurent des coûts différents. Une application plus légère en mémoire ne consomme pas automatiquement moins de CPU. Dans Tonal, certains contrôles de lecture et files de données utilisent encore des réveils périodiques. Leur coût, les buffers, le décodage et les options audio sont des pistes à profiler ; ce comparatif n’isole pas la cause exacte de l’écart.</p><p id="method"></p><p>Les codecs, les morceaux, la qualité audio et les réglages de normalisation ne sont pas alignés. Le GPU, les services Windows partagés, l’autonomie et le temps de lancement ne sont pas mesurés. Ces essais courts décrivent cet usage sur ce PC.</p><p>La mémoire privée correspond à la mémoire engagée par les processus, pas exactement à la RAM physique résidente. 1 Mio = 1 048 576 octets. Les working sets partagés ne sont pas additionnés au résultat principal.</p><p class="small">Source : compteurs CPU et mémoire Windows, échantillonneur v2 ; CPU recoupé avec les compteurs cumulés de début et fin. Données : docs/benchmarks/2026-11-13-tonal-spotify.json. Rapport autonome, sans connexion Internet.</p></section>
+</main>
+<script type="application/json" id="benchmark">{
+  "Date": "2026-11-13",
+  "Machine": {
+    "CPU": "AMD Ryzen 7 5700X",
+    "LogicalProcessors": 16,
+    "RAMGiB": 15.9,
+    "WindowsBuild": "26300"
+  },
+  "Versions": {
+    "Tonal": "0.3.0",
+    "Spotify": "1.3.8.620"
+  },
+  "Runs": [
+    {
+      "SamplerVersion": 2,
+      "CapturedUtc": "2026-11-13T04:23:50.9784127Z",
+      "Scenario": "paused_hidden",
+      "LogicalProcessors": 16,
+      "WarmupSeconds": 5,
+      "CsvNumberCulture": "fr-FR",
+      "Method": "Sum of private committed memory and CPU time of each app and all discovered descendants. User confirms playback/window state. No app state or settings changed by this script.",
+      "Limitations": "Shared Windows services and GPU memory/utilization are excluded. Working-set sums may double-count shared pages and are not the headline memory metric. Codec, content and audio quality are not controlled. Exited processes can lose their final sub-sample CPU time.",
+      "Results": [
+        {
+          "App": "tonal",
+          "Scenario": "paused_hidden",
+          "DurationSeconds": 30.437,
+          "Samples": 53,
+          "CpuOneCorePercent": 0.3594,
+          "CpuMachinePercent": 0.0225,
+          "InitialCpuSeconds": 26.765625,
+          "FinalCpuSeconds": 26.875,
+          "PrivateMiB": 140.12,
+          "MinPrivateMiB": 118.49,
+          "MaxPrivateMiB": 146.53,
+          "MinProcesses": 1.0,
+          "MaxProcesses": 1.0
+        },
+        {
+          "App": "Spotify",
+          "Scenario": "paused_hidden",
+          "DurationSeconds": 30.437,
+          "Samples": 53,
+          "CpuOneCorePercent": 0.2053,
+          "CpuMachinePercent": 0.0128,
+          "InitialCpuSeconds": 71.25,
+          "FinalCpuSeconds": 71.3125,
+          "PrivateMiB": 971.96,
+          "MinPrivateMiB": 971.78,
+          "MaxPrivateMiB": 972.17,
+          "MinProcesses": 8.0,
+          "MaxProcesses": 8.0
+        }
+      ]
+    },
+    {
+      "SamplerVersion": 2,
+      "CapturedUtc": "2026-11-13T04:21:16.0170971Z",
+      "Scenario": "playing_hidden",
+      "LogicalProcessors": 16,
+      "WarmupSeconds": 3,
+      "CsvNumberCulture": "fr-FR",
+      "Method": "Sum of private committed memory and CPU time of each app and all discovered descendants. User confirms playback/window state. No app state or settings changed by this script.",
+      "Limitations": "Shared Windows services and GPU memory/utilization are excluded. Working-set sums may double-count shared pages and are not the headline memory metric. Codec, content and audio quality are not controlled. Exited processes can lose their final sub-sample CPU time.",
+      "Results": [
+        {
+          "App": "tonal",
+          "Scenario": "playing_hidden",
+          "DurationSeconds": 30.421,
+          "Samples": 53,
+          "CpuOneCorePercent": 1.7463,
+          "CpuMachinePercent": 0.1091,
+          "InitialCpuSeconds": 21.515625,
+          "FinalCpuSeconds": 22.046875,
+          "PrivateMiB": 134.53,
+          "MinPrivateMiB": 120.06,
+          "MaxPrivateMiB": 146.84,
+          "MinProcesses": 1.0,
+          "MaxProcesses": 1.0
+        },
+        {
+          "App": "Spotify",
+          "Scenario": "playing_hidden",
+          "DurationSeconds": 30.421,
+          "Samples": 53,
+          "CpuOneCorePercent": 1.1813,
+          "CpuMachinePercent": 0.0738,
+          "InitialCpuSeconds": 63.0625,
+          "FinalCpuSeconds": 63.421875,
+          "PrivateMiB": 925.2,
+          "MinPrivateMiB": 922.91,
+          "MaxPrivateMiB": 926.53,
+          "MinProcesses": 8.0,
+          "MaxProcesses": 8.0
+        }
+      ]
+    }
+  ]
+}</script>
+<script>
+"use strict";
+const data=JSON.parse(document.getElementById("benchmark").textContent);
+let scenario="playing_hidden", unit="machine";
+const f=(v,n=2)=>v.toLocaleString("fr-FR",{minimumFractionDigits:n,maximumFractionDigits:n});
+const el=id=>document.getElementById(id);
+function bars(id,values,max,suffix,digits){const parent=el(id);parent.replaceChildren();for(let i=0;i<values.length;i++){const row=document.createElement("div");row.className="barrow";const name=document.createElement("span");name.textContent=i?"Spotify":"Tonal";const rail=document.createElement("div");rail.className="rail";const bar=document.createElement("div");bar.className=i?"bar spotify":"bar";bar.style.width=(100*values[i]/max)+"%";rail.append(bar);const value=document.createElement("span");value.className="number";value.textContent=f(values[i],digits)+suffix;row.append(name,rail,value);parent.append(row);}}
+function render(){const run=data.Runs.find(r=>r.Scenario===scenario),a=run.Results.find(r=>r.App==="tonal"),b=run.Results.find(r=>r.App==="Spotify"),save=100*(1-a.PrivateMiB/b.PrivateMiB);el("headline").textContent=f(save,1)+" % de mémoire privée en moins pour Tonal";el("memorySummary").textContent=f(a.PrivateMiB,0)+" Mio contre "+f(b.PrivateMiB,0)+" Mio, "+(scenario==="playing_hidden"?"en lecture":"en pause")+".";const memoryMax=Math.ceil(Math.max(a.PrivateMiB,b.PrivateMiB)/100)*100;bars("memoryBars",[a.PrivateMiB,b.PrivateMiB],memoryMax," Mio",0);el("memoryMax").textContent=f(memoryMax,0)+" Mio";const key=unit==="machine"?"CpuMachinePercent":"CpuOneCorePercent",step=unit==="machine"?.05:.5,max=Math.max(step,Math.ceil(Math.max(a[key],b[key])/step)*step),digits=unit==="machine"?4:3;bars("cpuBars",[a[key],b[key]],max," %",digits);el("cpuMax").textContent=f(max,unit==="machine"?2:1)+" %";el("cpuUnit").textContent=unit==="machine"?"CPU normalisé aux "+data.Machine.LogicalProcessors+" processeurs logiques du PC":"100 % = un cœur entièrement occupé";el("cpuSummary").textContent="Sur le PC entier, Tonal représente "+f(a.CpuMachinePercent,4)+" % de CPU et Spotify "+f(b.CpuMachinePercent,4)+" %. L’écart n’est que de "+f(Math.abs(a.CpuMachinePercent-b.CpuMachinePercent),4)+" point. La différence de mémoire est beaucoup plus marquée.";document.querySelectorAll("[data-state]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.state===scenario)));document.querySelectorAll("[data-unit]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.unit===unit)));}
+el("versions").textContent="Tonal "+data.Versions.Tonal+" · Spotify "+data.Versions.Spotify;el("machine").textContent=data.Machine.CPU+" · "+data.Machine.LogicalProcessors+" processeurs logiques · "+data.Machine.RAMGiB+" Gio de RAM · Windows 11, build "+data.Machine.WindowsBuild;
+for(const run of data.Runs){for(const r of run.Results){const tr=document.createElement("tr");for(const value of [run.Scenario==="playing_hidden"?"Lecture":"Pause",r.App==="tonal"?"Tonal":"Spotify",f(r.PrivateMiB)+" ("+f(r.MinPrivateMiB)+"–"+f(r.MaxPrivateMiB)+")",f(r.CpuOneCorePercent,3),f(r.CpuMachinePercent,4),String(r.MaxProcesses)]){const td=document.createElement("td");td.textContent=value;tr.append(td);}el("measurements").append(tr);}}
+el("method").textContent="Deux relevés d’environ 30 secondes sur le même PC, fenêtres minimisées, états confirmés par l’utilisateur. Les huit processus Spotify et le processus Tonal sont comptés. Le code et les paramètres des applications n’ont pas été modifiés par le relevé.";
+document.querySelectorAll("[data-state]").forEach(b=>b.addEventListener("click",()=>{scenario=b.dataset.state;render();}));document.querySelectorAll("[data-unit]").forEach(b=>b.addEventListener("click",()=>{unit=b.dataset.unit;render();}));render();
+</script></body></html>
