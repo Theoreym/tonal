@@ -92,6 +92,7 @@ Sources examinées : [Tubefast player.rs](https://github.com/yigitbozyaka/tubefa
 - [x] Aléatoire sur le catalogue complet de la playlist, chargé par pages en arrière-plan sans défilement, sans audio ni pochettes supplémentaires ; historique réel et doublons préservés, annulation et erreur sans repli silencieux sur une page partielle.
 - [x] Lecture séquentielle sans défilement : préparer le catalogue restant par pages à l'approche de la fin de la file connue ; conserver les 100 titres visibles et l'ordre canonique.
 - [x] Windows SMTC : métadonnées, pochette, progression, Lecture / Pause / Suivant / Précédent et déplacement, y compris Pause pendant le chargement. Zone de notification facultative et retour à la fenêtre.
+- [x] Suivre les changements de sortie audio Windows par défaut via Core Audio, sans sélecteur ; transfert du même lecteur et décodeur, conservation du volume / pause / métadonnées, retries bornés pendant l'initialisation du périphérique.
 - [x] Reprise chiffrée de la file / position / volume / shuffle / répétition, restauration en pause et sans préparation audio, effacement par Arrêt / Déconnexion.
 - [x] Panneau central temporaire de file : glisser les suivants, lire maintenant, retirer sans modifier la playlist YouTube ; état de file conservé dans la reprise.
 - [x] Chemin HTTP natif et résolution des signatures / `n` dans QuickJS embarqué avec EJS officiel ; repli yt-dlp Music puis multi-client, qualité Premium conservée.
@@ -112,6 +113,7 @@ Sources examinées : [Tubefast player.rs](https://github.com/yigitbozyaka/tubefa
 ## Prochain ticket
 
 - [x] Section Radios dans Ta bibliothèque : NRJ et Skyrock, logos locaux, flux MP3 natifs, pause coupant le réseau et reprise au direct. Décodage réel, changement de station sur sortie muette et captures validés le 16 novembre.
+- [x] Collection de radios personnalisable : bouton +, recherche Radio Browser à la demande, ajout sans doublons, retrait au clic droit et persistance locale indépendante de Google. Catalogue complet jamais chargé ; flux MP3 directs compatibles.
 
 - [x] Aléatoire intelligent facultatif dans les paramètres : espacement des artistes et titres récents, conservation du courant / historique / doublons / exclusions.
 - [x] Normalisation facultative dans les paramètres : atténuation par mesure YouTube, volume utilisateur inchangé, pas d'amplification ni de transcodage.

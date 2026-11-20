@@ -5,16 +5,18 @@
       <stop offset="1" stop-color="#0c0c0e"/>
     </linearGradient>
     <linearGradient id="signal">
-      <stop stop-color="#535358"/>
-      <stop offset=".5" stop-color="#e7e7e9"/>
-      <stop offset="1" stop-color="#535358"/>
+      <stop stop-color="#77777e"/>
+      <stop offset=".22" stop-color="#e7e7e9"/>
+      <stop offset=".38" stop-color="#e7e7e9"/>
+      <stop offset=".48" stop-color="#ff344b"/>
+      <stop offset=".6" stop-color="#ff344b"/>
+      <stop offset=".72" stop-color="#e7e7e9"/>
+      <stop offset="1" stop-color="#77777e"/>
     </linearGradient>
   </defs>
   <path fill="url(#background)" d="M0 0h512v512H0z"/>
   <g fill="none" stroke-linecap="round">
-    <path stroke="#414146" stroke-width="3" d="M80 268h352"/>
-    <path stroke="url(#signal)" stroke-width="5" d="M96 241v27m32-46v46m32-27v27m32-70v70m32-27v27m32-46v46m32-27v27m32-70v70m32-27v27m32-46v46m32-27v27"/>
-    <path stroke="#ff344b" stroke-width="7" d="M278 186v108"/>
+    <path stroke="#35353a" stroke-width="2" d="M48 256h416"/>
+    <path stroke="url(#signal)" stroke-width="7" d="M48 256C65 132 83 132 100 256S135 380 152 256S187 132 204 256S239 380 256 256S291 132 308 256S343 380 360 256S395 132 412 256S447 380 464 256"/>
   </g>
-  <circle fill="#ff344b" cx="278" cy="321" r="6"/>
 </svg>

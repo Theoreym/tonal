@@ -25,7 +25,7 @@
 
 ---
 
-Tonal rassemble tes playlists YouTube Music, des suggestions liées à tes écoutes et deux radios en direct dans une interface sans barre latérale. Le lecteur reste accessible en bas de la fenêtre, avec les pochettes, les commandes essentielles et une progression rouge.
+Tonal rassemble tes playlists YouTube Music, des suggestions liées à tes écoutes et tes radios en direct dans une interface sans barre latérale. Le lecteur reste accessible en bas de la fenêtre, avec les pochettes, les commandes essentielles et une progression rouge.
 
 L'interface utilise **egui / OpenGL** et la lecture audio est native. **WebView2 intervient uniquement dans une fenêtre temporaire de connexion Google.**
 
@@ -48,14 +48,19 @@ L'interface utilise **egui / OpenGL** et la lecture audio est native. **WebView2
 - **Normalisation du volume** facultative, selon les mesures fournies par YouTube, sans réencodage.
 - Restauration de la file et de la position au prochain lancement, en pause.
 - Commandes multimédias Windows et masquage facultatif dans la zone de notification.
+- Suivi automatique de la sortie audio par défaut de Windows, sans sélecteur dans l'application.
 
 ### Des découvertes à ta demande
 
 Les suggestions partent du morceau écouté. Elles écartent les titres déjà présents dans les playlists modifiables du compte et permettent d'ajouter une découverte à l'une de ces playlists depuis le lecteur.
 
-### NRJ et Skyrock en direct
+### Tes radios en direct
 
-La carte **Radios**, à la suite des playlists, ouvre une collection de **2 stations**. Elles fonctionnent sans compte Google et utilisent le même lecteur : pastille rouge pulsante, barre rouge pleine et commandes adaptées au direct. Mettre en pause coupe le flux ; reprendre rejoint le direct actuel.
+La carte **Radios**, à la suite des playlists, ouvre ta collection avec **NRJ et Skyrock** au départ. Le bouton **+** permet de rechercher une station par son nom et de l'ajouter ; un clic droit permet de la retirer. Seule ta collection est conservée localement : le catalogue de [Radio Browser](https://www.radio-browser.info/) est interrogé à la demande, par petits résultats.
+
+Les radios fonctionnent sans compte Google et utilisent le même lecteur : pastille rouge pulsante, barre rouge pleine et commandes adaptées au direct. Mettre en pause coupe le flux ; reprendre rejoint le direct actuel. La recherche propose les flux MP3 directs compatibles, hors HLS.
+
+Quand le flux fournit des métadonnées exploitables, l'artiste et le titre du morceau apparaissent sous le nom de la station et dans les commandes multimédias Windows. Les noms d'émission et les identifiants techniques reconnus sont écartés ; sans information exploitable, le lecteur conserve « Radio en direct ».
 
 ## Installation
 
@@ -90,7 +95,7 @@ Le flux est décodé localement, sans réencodage. Le badge **S / H / M**, activ
 ## Données et connexion
 
 - La session Google et la reprise de lecture sont **chiffrées par Windows DPAPI**, pour le compte Windows courant.
-- Les données locales sont conservées dans `%LOCALAPPDATA%\Tonal` : session, reprise, préférences et préparation publique du lecteur YouTube.
+- Les données locales sont conservées dans `%LOCALAPPDATA%\Tonal` : session, reprise, préférences, collection de radios et préparation publique du lecteur YouTube. Les stations choisies sont enregistrées dans `radios.json`, séparément du compte Google.
 - L'audio est mis en tampon en mémoire ; **aucun morceau n'est enregistré sur disque**. Les liens audio signés restent également en mémoire.
 - Tonal ne lit pas le champ de mot de passe Google. La connexion s'effectue dans la page Google, via un profil WebView2 temporaire.
 - **Déconnexion** efface la session locale ; elle ne révoque pas l'accès depuis les paramètres du compte Google. La désinstallation conserve les données locales.

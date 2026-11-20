@@ -1,4 +1,4 @@
-//! Two live stations, isolated from Google. Bounded compressed/PCM queues, no audio files.
+//! Live stations, isolated from Google. Bounded compressed/PCM queues, no audio files.
 use eframe::egui;
 use rodio::{Decoder, Source};
 use std::{
@@ -12,33 +12,93 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Station {
     Nrj,
     Skyrock,
+    Custom(Arc<CustomStation>),
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct CustomStation {
+    pub id: String,
+    pub name: String,
+    pub stream_url: String,
+    pub country: String,
+    pub favicon: String,
 }
 pub const STATIONS: [Station; 2] = [Station::Nrj, Station::Skyrock];
 impl Station {
-    pub fn name(self) -> &'static str {
+    pub fn song_title(&self, metadata: &str) -> Option<String> {
+        let (artist, title) = [" - ", " — ", " – "]
+            .into_iter()
+            .find_map(|separator| metadata.split_once(separator))?;
+        let artist = artist.trim();
+        let title = title.trim();
+        if artist.is_empty() || title.is_empty() {
+            return None;
+        }
+        let station = self.name().to_lowercase();
+        let label = artist.to_lowercase();
+        // A station name followed by a show name is not an artist / song pair.
+        if station == label
+            || station.starts_with(&format!("{label} "))
+            || station.ends_with(&format!(" {label}"))
+            || label.starts_with(&format!("{station} "))
+            || ["nrj", "skyrock", "publicité", "publicite", "unknown"].contains(&label.as_str())
+            || metadata.to_lowercase().contains("émission")
+            || metadata.to_lowercase().contains("emission")
+        {
+            return None;
+        }
+        Some(format!("{artist} — {title}"))
+    }
+    pub fn name(&self) -> &str {
         match self {
             Self::Nrj => "NRJ",
             Self::Skyrock => "Skyrock",
+            Self::Custom(station) => &station.name,
         }
     }
-    fn url(self) -> &'static str {
+    pub fn url(&self) -> &str {
         match self {
             Self::Nrj => "https://streaming.nrjaudio.fm/oumvmk8fnozc?origine=redirection_https_nrj",
             Self::Skyrock => "https://icecast.skyrock.net/s/natio_mp3_128k",
+            Self::Custom(station) => &station.stream_url,
         }
     }
-    fn logo(self) -> &'static [u8] {
+    fn logo(&self) -> &'static [u8] {
         match self {
             Self::Nrj => include_bytes!("../assets/brands/nrj.png"),
             Self::Skyrock => include_bytes!("../assets/brands/skyrock.svg"),
+            Self::Custom(_) => &[],
         }
     }
-    pub fn paint(self, ui: &egui::Ui, rect: egui::Rect) {
+    pub fn paint(&self, ui: &egui::Ui, rect: egui::Rect) {
         if !ui.is_rect_visible(rect) {
+            return;
+        }
+        if matches!(self, Self::Custom(_)) {
+            ui.painter()
+                .rect_filled(rect, 8, egui::Color32::from_gray(32));
+            let initials: String = self
+                .name()
+                .split_whitespace()
+                .filter_map(|word| word.chars().next())
+                .take(2)
+                .collect();
+            let first = self.name().split_whitespace().next().unwrap_or("");
+            let initials = if first.chars().count() <= 4 {
+                first.to_uppercase()
+            } else {
+                initials.to_uppercase()
+            };
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                initials,
+                egui::FontId::proportional(rect.height() * 0.3),
+                crate::ui::WHITE,
+            );
             return;
         }
         // Fixed textures avoid accumulating a new large image at every resize.
@@ -47,7 +107,7 @@ impl Station {
             .ctx()
             .data_mut(|data| data.get_temp::<egui::TextureHandle>(id))
             .unwrap_or_else(|| {
-                let image = if self == Self::Skyrock {
+                let image = if self == &Self::Skyrock {
                     egui_extras::image::load_svg_bytes_with_size(
                         self.logo(),
                         egui::load::SizeHint::Height(512),
@@ -122,11 +182,15 @@ struct Shared {
     ended: AtomicBool,
     buffering: AtomicBool,
     error: Mutex<Option<String>>,
+    now_playing: Mutex<Option<String>>,
 }
 pub struct Control {
     shared: Arc<Shared>,
 }
 impl Control {
+    pub fn now_playing(&self) -> Option<String> {
+        self.shared.now_playing.lock().unwrap().clone()
+    }
     pub fn buffering(&self) -> bool {
         self.shared.buffering.load(Ordering::Relaxed)
     }
@@ -204,6 +268,70 @@ pub struct Prepared {
     pub source: Output,
 }
 
+// ICY blocks are at most 4080 bytes. None means no update; Some(None) clears a stale title.
+fn metadata_title(bytes: &[u8]) -> Option<Option<String>> {
+    let bytes = bytes.split(|byte| *byte == 0).next()?;
+    let text = std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .unwrap_or_else(|_| {
+            bytes
+                .iter()
+                .map(|byte| match byte {
+                    0x80 => '€',
+                    0x85 => '…',
+                    0x91 | 0x92 => '’',
+                    0x93 => '“',
+                    0x94 => '”',
+                    0x96 => '–',
+                    0x97 => '—',
+                    0x9c => 'œ',
+                    _ => char::from(*byte),
+                })
+                .collect()
+        });
+    let lower = text.to_ascii_lowercase();
+    let start = lower.find("streamtitle=")? + "streamtitle=".len();
+    let rest = text[start..].trim_start();
+    let quote = rest
+        .chars()
+        .next()
+        .filter(|quote| matches!(quote, '\'' | '"'))?;
+    let rest = &rest[quote.len_utf8()..];
+    let end = rest
+        .find(&format!("{quote};"))
+        .or_else(|| rest.strip_suffix(quote).map(str::len))?;
+    let value: String = rest[..end]
+        .chars()
+        .filter(|character| !character.is_control() || character.is_whitespace())
+        .take(256)
+        .collect();
+    let value = value
+        .replace("&amp;", "&")
+        .replace("&apos;", "'")
+        .replace("&quot;", "\"");
+    let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let value = match value.rsplit_once('§') {
+        Some((title, id))
+            if id.trim().len() >= 5 && id.trim().chars().all(|c| c.is_ascii_digit()) =>
+        {
+            title.trim_end().to_owned()
+        }
+        _ => value,
+    };
+    // Some broadcasters send internal numeric IDs during ads, not artist/track names.
+    let numeric_ids = value.split_once(" - ").is_some_and(|(a, b)| {
+        !a.is_empty()
+            && !b.is_empty()
+            && a.chars().all(|c| c.is_ascii_digit())
+            && b.chars().all(|c| c.is_ascii_digit())
+    });
+    if value.is_empty() || numeric_ids || value.eq_ignore_ascii_case("unknown - unknown") {
+        Some(None)
+    } else {
+        Some(Some(value))
+    }
+}
+
 enum Packet {
     Header(usize),
     Data(Vec<u8>),
@@ -250,19 +378,22 @@ impl Reader {
             }
         }
     }
-    fn discard_metadata(&mut self) -> io::Result<()> {
+    fn read_metadata(&mut self) -> io::Result<()> {
         let mut length = [0];
         if self.raw(&mut length)? == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
-        let mut remaining = usize::from(length[0]) * 16;
-        let mut scratch = [0; 512];
-        while remaining > 0 {
-            let n = self.raw(&mut scratch[..remaining.min(512)])?;
+        let mut bytes = vec![0; usize::from(length[0]) * 16];
+        let mut at = 0;
+        while at < bytes.len() {
+            let n = self.raw(&mut bytes[at..])?;
             if n == 0 {
                 return Err(io::ErrorKind::UnexpectedEof.into());
             }
-            remaining -= n;
+            at += n;
+        }
+        if let Some(title) = metadata_title(&bytes) {
+            *self.shared.now_playing.lock().unwrap() = title;
         }
         self.remaining = self.meta_interval;
         Ok(())
@@ -294,7 +425,7 @@ impl Read for Reader {
             }
         }
         if self.meta_interval > 0 && self.remaining == 0 {
-            self.discard_metadata()?;
+            self.read_metadata()?;
         }
         let wanted = if self.meta_interval > 0 {
             output.len().min(self.remaining)
@@ -344,23 +475,30 @@ async fn send_packet(
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
-fn reader(station: Station, shared: Arc<Shared>, retry: u32) -> Result<Reader, String> {
+fn reader(station: &Station, shared: Arc<Shared>, retry: u32) -> Result<Reader, String> {
+    *shared.now_playing.lock().unwrap() = None;
     let (tx, receiver) = mpsc::sync_channel(8);
     let attempt = Arc::new(AtomicBool::new(false));
     let attempt_task = attempt.clone();
     let cancel = shared.cancel.clone();
-    let address = if station == Station::Nrj && retry % 2 == 1 {
+    let address = if station == &Station::Nrj && retry % 2 == 1 {
         "https://scdn.nrjaudio.fm/adwz2/fr/30001/mp3_128.mp3"
     } else {
         station.url()
-    };
+    }
+    .to_owned();
+    let custom = matches!(station, Station::Custom(_));
     crate::http_audio::network_runtime().map_err(|_| "Connexion radio indisponible.")?.spawn(async move {
         let task = async {
+            let mut response = if custom {
+                crate::radio_net::stream(&address).await.ok()?
+            } else {
             let client = reqwest::Client::builder().https_only(true).connect_timeout(Duration::from_secs(8)).read_timeout(Duration::from_secs(10))
                 .redirect(reqwest::redirect::Policy::custom(|next| if next.previous().len() < 6 && allowed(next.url()) { next.follow() } else { next.stop() }))
                 .build().ok()?;
-            let response = client.get(address).header("User-Agent", "Tonal/0.3").header("Icy-MetaData", "0").send().await;
-            let mut response = response.ok()?.error_for_status().ok()?;
+            let response = client.get(address).header("User-Agent", "Tonal/0.3").header("Icy-MetaData", "1").send().await;
+            response.ok()?.error_for_status().ok()?
+            };
             if !response.status().is_success() { return None; }
             let interval = response.headers().get("icy-metaint").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<usize>().ok()).unwrap_or(0);
             if interval > 1024 * 1024 || !send_packet(&tx, Packet::Header(interval), &cancel, &attempt_task).await { return None; }
@@ -398,6 +536,7 @@ pub fn prepare(
         ended: AtomicBool::new(false),
         buffering: AtomicBool::new(true),
         error: Mutex::new(None),
+        now_playing: Mutex::new(None),
     });
     let control = Control {
         shared: shared.clone(),
@@ -410,7 +549,7 @@ pub fn prepare(
         let mut failures = 0;
         while !worker.cancel.load(Ordering::SeqCst) && failures < 5 {
             let result = (|| -> Result<(), String> {
-                let input = reader(station, worker.clone(), failures)?;
+                let input = reader(&station, worker.clone(), failures)?;
                 let mut decoder = Decoder::builder()
                     .with_data(input)
                     .with_seekable(false)
@@ -511,7 +650,88 @@ mod tests {
             ended: AtomicBool::new(false),
             buffering: AtomicBool::new(true),
             error: Mutex::new(None),
+            now_playing: Mutex::new(None),
         })
+    }
+    #[test]
+    fn icy_titles_preserve_apostrophes_accents_and_explicit_clear() {
+        assert_eq!(
+            metadata_title("StreamTitle='Tame Impala - Loser §7768503';".as_bytes()),
+            Some(Some("Tame Impala - Loser".into()))
+        );
+        assert_eq!(
+            metadata_title(b"StreamTitle='Lighthouse Family - Ain't No Sunshine';StreamUrl='';\0"),
+            Some(Some("Lighthouse Family - Ain't No Sunshine".into()))
+        );
+        assert_eq!(
+            metadata_title(b"StreamTitle='Beyonc\xe9 - Halo';"),
+            Some(Some("Beyoncé - Halo".into()))
+        );
+        assert_eq!(metadata_title(b"StreamTitle='';"), Some(None));
+        assert_eq!(metadata_title(b"StreamTitle='5639 - 5639';"), Some(None));
+        assert_eq!(metadata_title(b"StreamUrl='https://example.com/';"), None);
+        assert_eq!(metadata_title(&[]), None);
+    }
+    #[test]
+    fn station_programmes_are_not_displayed_as_songs() {
+        assert_eq!(Station::Skyrock.song_title("SKYROCK - Le 16/20"), None);
+        assert_eq!(Station::Nrj.song_title("NRJ - Le morning"), None);
+        assert_eq!(Station::Skyrock.song_title("Le 16/20"), None);
+        assert_eq!(
+            Station::Skyrock.song_title("Animateur - émission du soir"),
+            None
+        );
+        assert_eq!(
+            Station::Skyrock.song_title("Lighthouse Family - Ain't No Sunshine"),
+            Some("Lighthouse Family — Ain't No Sunshine".into())
+        );
+        let station = Station::Custom(Arc::new(CustomStation {
+            id: "fip".into(),
+            name: "FIP autour du groove".into(),
+            stream_url: "https://example.com/live".into(),
+            country: "FR".into(),
+            favicon: String::new(),
+        }));
+        assert_eq!(station.song_title("FIP - Le club jazz"), None);
+        assert_eq!(
+            station.song_title("Beyoncé — Halo"),
+            Some("Beyoncé — Halo".into())
+        );
+    }
+    #[test]
+    fn fragmented_icy_title_is_published_without_reaching_the_audio_decoder() {
+        let (tx, receiver) = mpsc::sync_channel(32);
+        tx.send(Packet::Header(3)).unwrap();
+        let title = b"StreamTitle='Artist - Song';StreamUrl='';";
+        let size = title.len().div_ceil(16) * 16;
+        let mut bytes = b"abc".to_vec();
+        bytes.push((size / 16) as u8);
+        bytes.extend_from_slice(title);
+        bytes.resize(4 + size, 0);
+        bytes.extend_from_slice(b"def\0");
+        for chunk in bytes.chunks(3) {
+            tx.send(Packet::Data(chunk.to_vec())).unwrap();
+        }
+        drop(tx);
+        let state = shared();
+        let mut reader = Reader {
+            receiver: Mutex::new(receiver),
+            shared: state.clone(),
+            attempt: Arc::new(AtomicBool::new(false)),
+            data: vec![],
+            at: 0,
+            meta_interval: 0,
+            remaining: 0,
+            position: 0,
+            initialized: false,
+        };
+        let mut audio = vec![];
+        reader.read_to_end(&mut audio).unwrap();
+        assert_eq!(audio, b"abcdef");
+        assert_eq!(
+            state.now_playing.lock().unwrap().as_deref(),
+            Some("Artist - Song")
+        );
     }
     #[test]
     fn station_hosts_are_isolated_from_google_and_other_destinations() {
@@ -589,7 +809,7 @@ mod tests {
     fn both_stations_decode_live_and_release_their_workers_when_stopped() {
         for station in STATIONS {
             let prepared = prepare(
-                station,
+                station.clone(),
                 Arc::new(AtomicBool::new(false)),
                 egui::Context::default(),
             )
@@ -613,6 +833,14 @@ mod tests {
                 station.name(),
                 source.sample_rate(),
                 source.channels()
+            );
+            eprintln!(
+                "Métadonnée ICY : {:?} ; morceau exploitable : {:?}",
+                prepared.control.now_playing(),
+                prepared
+                    .control
+                    .now_playing()
+                    .and_then(|text| station.song_title(&text))
             );
             drop(prepared.control);
             drop(source);

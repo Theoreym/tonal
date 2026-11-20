@@ -31,6 +31,8 @@ windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Wi
 raw-window-handle = "0.6"
 souvlaki = { version = "0.9.3", default-features = false }
 tray-icon = { version = "0.26.1", default-features = false }
+windows = { version = "0.62.2", features = ["Win32_Media_Audio", "Win32_System_Com", "Win32_Foundation"] }
+windows-core = "0.62.2"
 
 [target.'cfg(windows)'.dev-dependencies]
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }

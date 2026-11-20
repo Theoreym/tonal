@@ -75,6 +75,8 @@ impl From<ProviderError> for GoogleError {
 pub struct AppState {
     pub audio: Option<AudioPlayer>,
     pub audio_error: Option<String>,
+    output_devices: Option<crate::audio_devices::Watcher>,
+    resume_after_output_change: bool,
     pub import_busy: bool,
     pub now_playing: Option<Track>,
     pub radio_station: Option<crate::radio::Station>,
@@ -82,6 +84,7 @@ pub struct AppState {
     radio_receiver: Option<Receiver<Result<crate::radio::Prepared, String>>>,
     radio_cancel: Option<Arc<AtomicBool>>,
     radio_control: Option<crate::radio::Control>,
+    radio_now_playing: Option<String>,
     retry_position: Option<std::time::Duration>,
     import_position: std::time::Duration,
     pause_after_load: bool,
@@ -137,6 +140,8 @@ impl AppState {
         Self {
             audio: None,
             audio_error: None,
+            output_devices: None,
+            resume_after_output_change: false,
             import_busy: false,
             now_playing: None,
             radio_station: None,
@@ -144,6 +149,7 @@ impl AppState {
             radio_receiver: None,
             radio_cancel: None,
             radio_control: None,
+            radio_now_playing: None,
             retry_position: None,
             import_position: std::time::Duration::ZERO,
             pause_after_load: false,
@@ -196,6 +202,7 @@ impl AppState {
     }
     pub fn new(ctx: &egui::Context) -> Self {
         let mut state = Self::empty();
+        state.output_devices = crate::audio_devices::Watcher::new(ctx);
         match AudioPlayer::new() {
             Ok(player) => state.audio = Some(player),
             Err(message) => state.audio_error = Some(message),
@@ -963,6 +970,7 @@ impl AppState {
     }
 
     pub fn poll(&mut self, ctx: &egui::Context) {
+        self.poll_default_output(ctx);
         self.poll_radio();
         self.poll_playlist_management();
         self.poll_playlist_adds(ctx);
@@ -978,7 +986,12 @@ impl AppState {
         self.save_playback();
         self.poll_catalog(ctx);
         self.ensure_full_queue(ctx, false);
-        if let Some(error) = self.audio.as_ref().and_then(|audio| audio.take_error()) {
+        if let Some((error, output_failed)) =
+            self.audio.as_ref().and_then(|audio| audio.take_error())
+        {
+            if output_failed && !self.playback_paused() {
+                self.resume_after_output_change = true;
+            }
             if self.radio_station.is_some() {
                 self.pause_radio();
                 self.retry_position = Some(std::time::Duration::ZERO);
@@ -1287,6 +1300,7 @@ impl AppState {
     }
 
     pub fn stop(&mut self) {
+        self.resume_after_output_change = false;
         self.cancel_radio();
         self.clear_level();
         self.clear_catalog_job();
@@ -1305,7 +1319,46 @@ impl AppState {
         self.save_playback();
     }
 
+    fn poll_default_output(&mut self, ctx: &egui::Context) {
+        if !self
+            .output_devices
+            .as_mut()
+            .is_some_and(|watcher| watcher.ready(ctx))
+        {
+            return;
+        }
+        let result = if let Some(audio) = &mut self.audio {
+            audio.follow_default_output()
+        } else {
+            AudioPlayer::new().map(|audio| self.audio = Some(audio))
+        };
+        match result {
+            Ok(()) => {
+                self.output_devices.as_mut().unwrap().succeeded();
+                self.audio_error = None;
+                if self.resume_after_output_change {
+                    self.resume_after_output_change = false;
+                    self.retry_position = None;
+                    if let Some(station) = self.radio_station.clone() {
+                        self.play_radio(ctx, station);
+                    } else if let Some(audio) = &mut self.audio {
+                        if audio.is_paused() && !audio.is_empty() {
+                            audio.toggle_pause();
+                        }
+                    }
+                    self.status.clear();
+                }
+                ctx.request_repaint();
+            }
+            Err(error) => {
+                if !self.output_devices.as_mut().unwrap().retry(ctx) {
+                    self.status = error;
+                }
+            }
+        }
+    }
     fn cancel_radio(&mut self) {
+        self.radio_now_playing = None;
         if let Some(cancel) = self.radio_cancel.take() {
             cancel.store(true, Ordering::SeqCst);
         }
@@ -1333,7 +1386,7 @@ impl AppState {
         self.queue.set_smart_shuffle(smart);
         self.queue.repeat = repeat;
         self.queue.shuffle = shuffle;
-        self.radio_station = Some(station);
+        self.radio_station = Some(station.clone());
         self.radio_paused = false;
         self.import_busy = true;
         self.status.clear();
@@ -1349,15 +1402,31 @@ impl AppState {
         ctx.request_repaint();
     }
     fn pause_radio(&mut self) {
-        let station = self.radio_station;
+        let station = self.radio_station.take();
+        let now_playing = self.radio_now_playing.take();
         self.cancel_radio();
         self.radio_station = station;
+        self.radio_now_playing = now_playing;
         self.import_busy = false;
         if let Some(audio) = &mut self.audio {
             audio.stop();
         }
     }
     fn poll_radio(&mut self) {
+        if let Some(control) = &self.radio_control {
+            let now_playing = control.now_playing().and_then(|text| {
+                self.radio_station
+                    .as_ref()
+                    .and_then(|station| station.song_title(&text))
+            });
+            if self.radio_now_playing != now_playing {
+                self.radio_now_playing = now_playing;
+                let status = self.radio_status().to_owned();
+                if let Some(audio) = &mut self.audio {
+                    audio.artist = status;
+                }
+            }
+        }
         let result = self
             .radio_receiver
             .as_ref()
@@ -1373,7 +1442,9 @@ impl AppState {
             self.import_busy = false;
             match result {
                 Ok(prepared) => {
-                    if let (Some(station), Some(audio)) = (self.radio_station, &mut self.audio) {
+                    if let (Some(station), Some(audio)) =
+                        (self.radio_station.as_ref(), &mut self.audio)
+                    {
                         audio.load_radio(prepared.source, station.name());
                         self.radio_control = Some(prepared.control);
                     }
@@ -1392,6 +1463,11 @@ impl AppState {
             self.pause_radio();
             self.status = error;
         }
+    }
+    pub fn radio_status(&self) -> &str {
+        self.radio_now_playing
+            .as_deref()
+            .unwrap_or("Radio en direct")
     }
     pub fn radio_buffering(&self) -> bool {
         self.radio_receiver.is_some()
@@ -1412,10 +1488,11 @@ impl AppState {
     }
     pub fn display_track(&self) -> Option<Track> {
         self.radio_station
+            .as_ref()
             .map(|station| Track {
                 video_id: format!("radio:{}", station.name()),
                 title: station.name().into(),
-                artist: "Radio en direct".into(),
+                artist: self.radio_status().into(),
                 ..Default::default()
             })
             .or_else(|| self.now_playing.clone())
@@ -1479,7 +1556,7 @@ impl AppState {
         }
     }
     pub fn toggle_pause(&mut self, ctx: &egui::Context) {
-        if let Some(station) = self.radio_station {
+        if let Some(station) = self.radio_station.clone() {
             if self.radio_paused {
                 self.play_radio(ctx, station);
             } else {
@@ -1511,6 +1588,9 @@ impl AppState {
     }
 
     pub fn set_playing(&mut self, ctx: &egui::Context, playing: bool) {
+        if !playing {
+            self.resume_after_output_change = false;
+        }
         if self.radio_station.is_some() {
             if playing == self.radio_paused {
                 self.toggle_pause(ctx);
@@ -1947,6 +2027,52 @@ impl Drop for AppState {
 mod stream_tests {
     use super::*;
     #[test]
+    #[ignore = "Réseau et sortie Windows muette : injecte les notifications de routage, sans modifier les périphériques Windows."]
+    fn default_output_events_transfer_live_radio_and_respect_explicit_pause_after_loss() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::empty();
+        state.audio = Some(AudioPlayer::new().unwrap());
+        state.audio.as_mut().unwrap().set_volume(0.0);
+        state.output_devices = Some(crate::audio_devices::Watcher::new(&ctx).unwrap());
+        state.play_radio(&ctx, crate::radio::Station::Nrj);
+        until(&mut state, &ctx, |state| !state.import_busy);
+        assert!(!state.playback_paused());
+        let original_connection = state.radio_cancel.clone().unwrap();
+        let generation = state.audio.as_ref().unwrap().routing_generation();
+        state.output_devices.as_ref().unwrap().notify_test_change();
+        until(&mut state, &ctx, |state| {
+            state.audio.as_ref().unwrap().routing_generation() > generation
+        });
+        assert!(Arc::ptr_eq(
+            &original_connection,
+            state.radio_cancel.as_ref().unwrap()
+        ));
+        assert!(!state.playback_paused() && !original_connection.load(Ordering::SeqCst));
+        // A genuine output failure pauses the source; a later default-output event recovers intent.
+        state.audio.as_ref().unwrap().simulate_output_loss();
+        state.poll(&ctx);
+        assert!(state.playback_paused() && state.resume_after_output_change);
+        let generation = state.audio.as_ref().unwrap().routing_generation();
+        state.output_devices.as_ref().unwrap().notify_test_change();
+        until(&mut state, &ctx, |state| {
+            state.audio.as_ref().unwrap().routing_generation() > generation && !state.import_busy
+        });
+        assert!(!state.playback_paused());
+        assert_eq!(state.audio.as_ref().unwrap().volume, 0.0);
+        // An explicit Pause after a loss must cancel automatic resumption.
+        state.audio.as_ref().unwrap().simulate_output_loss();
+        state.poll(&ctx);
+        state.set_playing(&ctx, false);
+        assert!(!state.resume_after_output_change);
+        let generation = state.audio.as_ref().unwrap().routing_generation();
+        state.output_devices.as_ref().unwrap().notify_test_change();
+        until(&mut state, &ctx, |state| {
+            state.audio.as_ref().unwrap().routing_generation() > generation
+        });
+        assert!(state.playback_paused() && state.radio_control.is_none() && !state.import_busy);
+        state.stop();
+    }
+    #[test]
     #[ignore = "Réseau et sortie audio Windows muette ; teste les deux radios sans session Google ni écriture de fichier musical."]
     fn radios_play_pause_resume_and_switch_without_google() {
         let ctx = egui::Context::default();
@@ -1954,7 +2080,7 @@ mod stream_tests {
         state.audio = Some(AudioPlayer::new().unwrap());
         state.audio.as_mut().unwrap().set_volume(0.0);
         for station in crate::radio::STATIONS {
-            state.play_radio(&ctx, station);
+            state.play_radio(&ctx, station.clone());
             until(&mut state, &ctx, |state| !state.import_busy);
             assert!(
                 !state.playback_paused(),

@@ -2,6 +2,8 @@
 mod app_state;
 mod artwork;
 mod audio;
+mod audio_devices;
+mod audio_route;
 mod auth;
 mod auth_diagnostics;
 mod auth_navigation;
@@ -26,6 +28,8 @@ mod preferences;
 mod provider;
 mod queue_panel;
 mod radio;
+mod radio_library;
+mod radio_net;
 mod resolution_cache;
 mod row_motion;
 mod session;
@@ -59,6 +63,7 @@ struct TonalApp {
     queue_dragging: Option<usize>,
     suggestions_open: bool,
     radios_open: bool,
+    radios: radio_library::Library,
     add_menu_open: bool,
     add_menu_track: Option<String>,
     playlist_motion: row_motion::RowMotion,
@@ -112,6 +117,7 @@ impl TonalApp {
             queue_dragging: None,
             suggestions_open: false,
             radios_open: false,
+            radios: radio_library::Library::load(),
             add_menu_open: false,
             add_menu_track: None,
             playlist_motion: Default::default(),
@@ -751,7 +757,15 @@ impl TonalApp {
             playlists.push(provider::Playlist {
                 id: RADIOS_ID.into(),
                 title: "Radios".into(),
-                subtitle: format!("{} stations", radio::STATIONS.len()),
+                subtitle: format!(
+                    "{} station{}",
+                    self.radios.stations.len(),
+                    if self.radios.stations.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                ),
                 ..Default::default()
             });
         }
@@ -1387,31 +1401,63 @@ impl TonalApp {
                 ui.label(RichText::new("PLAYLIST").size(10.0).strong().color(MUTED));
                 ui.label(ui::heading("Radios", 27.0));
                 ui.label(
-                    RichText::new(format!("{} stations", radio::STATIONS.len()))
-                        .size(13.0)
-                        .color(MUTED),
+                    RichText::new(format!(
+                        "{} station{}",
+                        self.radios.stations.len(),
+                        if self.radios.stations.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        }
+                    ))
+                    .size(13.0)
+                    .color(MUTED),
                 );
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let response = icon_button(ui, Icon::Plus, "Ajouter une radio", 36.0, false, true);
+                #[cfg(feature = "ui-capture")]
+                ctx.data_mut(|data| {
+                    data.insert_temp(egui::Id::unique("qa_radio_add_button"), response.rect)
+                });
+                if response.clicked() {
+                    self.radios.open();
+                }
             });
         });
         ui.add_space(22.0);
         ui.separator();
         let filter = self.filter.to_lowercase();
-        let stations: Vec<_> = radio::STATIONS
-            .into_iter()
+        let stations: Vec<_> = self
+            .radios
+            .stations
+            .iter()
             .filter(|station| filter.is_empty() || station.name().to_lowercase().contains(&filter))
+            .cloned()
             .collect();
+        if let Some(error) = &self.radios.error {
+            ui.label(RichText::new(error).size(13.0).color(RED));
+        }
         if stations.is_empty() {
-            ui.label(RichText::new("Aucune radio ne correspond.").color(MUTED));
+            ui.label(
+                RichText::new(if self.radios.stations.is_empty() {
+                    "Ajoute tes stations avec le bouton +."
+                } else {
+                    "Aucune radio ne correspond."
+                })
+                .color(MUTED),
+            );
             return;
         }
         let mut selected = None;
+        let mut remove = None;
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             for station in stations {
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::click());
                 let cover = Rect::from_min_size(rect.min + vec2(10.0, 12.0), vec2(48.0, 48.0));
-                let active = self.state.radio_station == Some(station);
+                let active = self.state.radio_station.as_ref() == Some(&station);
                 let paused = self.state.playback_paused();
                 if active || response.hovered() || response.has_focus() {
                     ui.painter().rect_filled(
@@ -1424,7 +1470,7 @@ impl TonalApp {
                         },
                     );
                 }
-                station.paint(ui, cover);
+                radio_library::paint_station(&station, ui, cover, &mut self.artwork);
                 if active || response.hovered() || response.has_focus() {
                     ui.painter().rect_filled(
                         cover,
@@ -1467,6 +1513,12 @@ impl TonalApp {
                         station.name(),
                     )
                 });
+                response.context_menu(|ui| {
+                    if button(ui, "Retirer", Icon::Trash, ButtonKind::Quiet, true).clicked() {
+                        remove = Some(station.clone());
+                        ui.close();
+                    }
+                });
                 if response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
@@ -1475,6 +1527,16 @@ impl TonalApp {
                 }
             }
         });
+        if let Some(station) = remove {
+            match self.radios.remove(&station) {
+                Ok(()) => {
+                    if self.state.radio_station.as_ref() == Some(&station) {
+                        self.state.stop();
+                    }
+                }
+                Err(error) => self.radios.error = Some(error),
+            }
+        }
         if let Some((station, active)) = selected {
             self.queue_open = false;
             self.add_menu_open = false;
@@ -1745,8 +1807,8 @@ impl TonalApp {
                     content.min + vec2(inset, inset),
                     vec2(artwork_size, artwork_size),
                 );
-                if let Some(station) = self.state.radio_station {
-                    station.paint(ui, artwork);
+                if let Some(station) = self.state.radio_station.as_ref() {
+                    radio_library::paint_station(station, ui, artwork, &mut self.artwork);
                 } else {
                     self.artwork.paint(
                         ui,
@@ -1778,6 +1840,7 @@ impl TonalApp {
                 let title = self
                     .state
                     .radio_station
+                    .as_ref()
                     .map(|station| station.name())
                     .or_else(|| {
                         self.state
@@ -1788,7 +1851,7 @@ impl TonalApp {
                     .or_else(|| current.map(|audio| audio.title.as_str()))
                     .unwrap_or("Aucun titre en lecture");
                 let artist = if live {
-                    "Radio en direct"
+                    self.state.radio_status()
                 } else {
                     self.state
                         .now_playing
@@ -2232,6 +2295,7 @@ fn time(duration: Duration) -> String {
 impl eframe::App for TonalApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.settings_open
+            && !self.radios.open
             && !self.state.playlist_management.is_open()
             && !ctx.egui_wants_keyboard_input()
             && !egui::Popup::is_any_open(ctx)
@@ -2270,6 +2334,7 @@ impl eframe::App for TonalApp {
                 && std::env::var("TONAL_CAPTURE_ACTION").as_deref() == Ok("tray"));
         self.desktop.poll(&mut self.state, ctx, close_to_tray);
         self.state.poll(ctx);
+        self.radios.poll(ctx);
         #[cfg(feature = "ui-capture")]
         if let Some(probe) = &mut self.performance {
             if probe.tick(&mut self.state, ctx) {
@@ -2415,6 +2480,12 @@ impl eframe::App for TonalApp {
                 let position = match action.as_str() {
                     "radio-open" => ctx
                         .data(|data| data.get_temp::<Rect>(egui::Id::unique("qa_radio_collection")))
+                        .map(|rect| rect.center()),
+                    "radio-add-open" => ctx
+                        .data(|data| data.get_temp::<Rect>(egui::Id::unique("qa_radio_add_button")))
+                        .map(|rect| rect.center()),
+                    "radio-add-station" => ctx
+                        .data(|data| data.get_temp::<Rect>(egui::Id::unique("qa_radio_add_result")))
                         .map(|rect| rect.center()),
                     "playlist-add-open" | "playlist-add-optimistic" | "playlist-add-rollback"
                         if self.state.playlist_add.choices.is_some()
@@ -2658,6 +2729,7 @@ impl eframe::App for TonalApp {
             self.add_menu_open = false;
             playlist_management::show(ctx, &mut self.state, &mut self.backdrop);
         }
+        self.radios.show(ctx, &mut self.backdrop, &mut self.artwork);
         #[cfg(feature = "ui-capture")]
         if std::env::var("TONAL_CAPTURE_PAGE").as_deref() == Ok("queue")
             && !ctx
@@ -2713,6 +2785,15 @@ impl TonalApp {
                 self.state.selected_playlist = None;
                 self.suggestions_open = false;
                 self.radios_open = true;
+            }
+            Ok("radio-search") => {
+                self.radios_open = true;
+                self.suggestions_open = false;
+                let id = egui::Id::unique("qa_radio_search_prepared");
+                if !ctx.data(|data| data.get_temp::<bool>(id)).unwrap_or(false) {
+                    ctx.data_mut(|data| data.insert_temp(id, true));
+                    self.radios.qa_search(ctx);
+                }
             }
             Ok("radio-player") => {
                 self.state.selected_playlist = None;
@@ -2875,6 +2956,15 @@ impl TonalApp {
                 assert!(self.capture_settings_action_done && self.radios_open);
                 assert!(self.state.selected_playlist.is_none());
                 eprintln!("Navigation Radios : clic sur la carte locale, ouverture de sa liste sans playlist Google.");
+            }
+            if std::env::var("TONAL_CAPTURE_ACTION").as_deref() == Ok("radio-add-open") {
+                assert!(self.capture_settings_action_done && self.radios.open);
+                eprintln!("Radios : le bouton + ouvre le dialogue natif.");
+            }
+            if std::env::var("TONAL_CAPTURE_ACTION").as_deref() == Ok("radio-add-station") {
+                assert!(self.capture_settings_action_done);
+                assert!(self.radios.stations.iter().any(|station| matches!(station, radio::Station::Custom(station) if station.name.contains("FIP"))));
+                eprintln!("Radios : recherche réelle et clic d'ajout validés ; aucun fichier utilisateur modifié.");
             }
             if std::env::var("TONAL_CAPTURE_ACTION").as_deref() == Ok("volume-leave") {
                 assert!(self.capture_settings_action_done && self.capture_queue_stage == 4);

@@ -12,7 +12,11 @@ Aucun besoin d'installer Rust, Python, Node.js, yt-dlp ou FFmpeg. Les outils de 
 
 ## Utiliser
 
-Dans Bibliothèque, la carte Radios apparaît à la suite des playlists. L'ouvrir affiche NRJ et Skyrock sous forme de lignes, comme une playlist classique ; cliquer sur une station lance le direct dans le lecteur habituel. La pause coupe la connexion et la reprise rejoint le direct actuel. Ces deux radios fonctionnent sans connexion Google. Une pastille rouge pulsante remplace la durée ; la barre rouge reste pleine et non déplaçable. Les boutons précédent, suivant, répétition, aléatoire et file sont inactifs pendant une radio ; le volume reste réglable.
+Dans Bibliothèque, la carte Radios apparaît à la suite des playlists. L'ouvrir affiche ta collection, avec NRJ et Skyrock au départ. Le bouton + ouvre une recherche par nom ; cliquer sur + à droite d'un résultat ajoute cette station. Une coche indique les stations déjà ajoutées. Un clic droit sur une station de la collection permet de la retirer. La collection est conservée dans `%LOCALAPPDATA%\Tonal\radios.json`, même après redémarrage ou déconnexion de Google. Le catalogue Radio Browser n'est interrogé qu'après saisie d'une recherche ; seuls les résultats bornés et leurs visuels visibles sont chargés. La recherche est limitée aux flux MP3 directs compatibles, hors HLS.
+
+Cliquer sur une station lance le direct dans le lecteur habituel, sans connexion Google. La pause coupe la connexion et la reprise rejoint le direct actuel. Une pastille rouge pulsante remplace la durée ; la barre rouge reste pleine et non déplaçable. Les boutons précédent, suivant, répétition, aléatoire et file sont inactifs pendant une radio ; le volume reste réglable.
+
+Sous le nom de la station, Tonal affiche artiste — titre quand le flux fournit un couple exploitable. Les noms d'émission reconnus et les identifiants numériques sont masqués. Les métadonnées viennent directement de la radio, sans reconnaissance audio ; leur disponibilité et leur fraîcheur dépendent de la station. À défaut, « Radio en direct » reste affiché.
 
 Se connecter à Google depuis le bouton Compte, choisir une playlist, puis un titre. La qualité dépend de l'abonnement et des formats disponibles. La recherche filtre la bibliothèque personnelle.
 
@@ -25,6 +29,8 @@ Le bouton `+` près du rafraîchissement crée une playlist avec le titre choisi
 - Échap : fermer les paramètres ou le menu actif.
 
 Les commandes de lecture ne capturent pas les touches lorsqu'on saisit du texte ou qu'un menu est ouvert.
+
+Tonal suit la sortie audio par défaut de Windows. Si Windows choisit tes écouteurs après leur connexion, le lecteur transfère le son vers eux sans sélecteur à régler dans Tonal. Le titre, la position, le volume et la pause sont conservés ; un court silence peut accompagner le changement de sortie. Connecter un périphérique qui ne devient pas la sortie par défaut ne change pas la lecture.
 
 ## Relancer après une modification du code
 

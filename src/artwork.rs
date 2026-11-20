@@ -92,7 +92,16 @@ impl ArtworkCache {
         self.load(ctx, url)
     }
 
+    pub fn radio_texture(&mut self, ctx: &egui::Context, url: &str) -> Option<TextureHandle> {
+        crate::radio_net::allowed(url).then_some(())?;
+        self.load_kind(ctx, url, true)
+    }
+
     fn load(&mut self, ctx: &egui::Context, url: &str) -> Option<TextureHandle> {
+        self.load_kind(ctx, url, false)
+    }
+
+    fn load_kind(&mut self, ctx: &egui::Context, url: &str, radio: bool) -> Option<TextureHandle> {
         self.clock += 1;
         if let Some(entry) = self.entries.get_mut(url) {
             entry.used = self.clock;
@@ -134,7 +143,11 @@ impl ArtworkCache {
         let sender = self.sender.clone();
         let ctx = ctx.clone();
         thread::spawn(move || {
-            let image = download(&client, &url);
+            let image = if radio {
+                download_radio(&url)
+            } else {
+                download(&client, &url)
+            };
             let _ = sender.send((url, image));
             ctx.request_repaint();
         });
@@ -184,6 +197,31 @@ fn download(client: &Client, url: &str) -> Option<egui::ColorImage> {
         return None;
     }
     decode(&bytes)
+}
+
+fn download_radio(url: &str) -> Option<egui::ColorImage> {
+    crate::http_audio::network_runtime().ok()?.block_on(async {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let mut response = crate::radio_net::get(url).await.ok()?;
+            if response
+                .content_length()
+                .is_some_and(|size| size > 4 * 1024 * 1024)
+            {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.chunk().await.ok()? {
+                if bytes.len() + chunk.len() > 4 * 1024 * 1024 {
+                    return None;
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            decode(&bytes)
+        })
+        .await
+        .ok()
+        .flatten()
+    })
 }
 
 fn decode(bytes: &[u8]) -> Option<egui::ColorImage> {

@@ -10,4 +10,4 @@ cargo run --example export_icon --features ui-capture
 
 L'icône SVG est utilisée par la fenêtre native. `build.rs` incorpore l'ICO aux ressources Windows de l'exécutable via le SDK Windows. Le code et cette icône originale sont sous la licence MIT du projet. Les logos des services ont leurs propres conditions, décrites dans [brands/README.md](brands/README.md).
 
-`radios-cover.svg` est la couverture originale de la collection Radios : cadran de fréquences minimal avec graduations claires et repère rouge sur fond sombre. Dessin vectoriel local sous la licence du projet, partagé par la carte et l'en-tête, rendu en une texture de 512 pixels avec mipmaps. Les logos NRJ et Skyrock restent sur leurs stations respectives.
+`radios-cover.svg` est la couverture originale de la collection Radios : onde sinusoïdale claire avec accent rouge sur fond sombre, sans chiffres ni texte. Le motif occupe la majeure partie de la largeur pour rester lisible en miniature. Dessin vectoriel local sous la licence du projet, partagé par la carte et l'en-tête, rendu en une texture de 512 pixels avec mipmaps. Les logos NRJ et Skyrock restent sur leurs stations respectives.

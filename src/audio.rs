@@ -13,6 +13,7 @@ use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 pub struct AudioPlayer {
     // Keep the stream alive for the full lifetime of playback.
     _stream: OutputStream,
+    route: crate::audio_route::Route,
     sink: Sink,
     pub title: String,
     pub artist: String,
@@ -29,6 +30,14 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
+    #[cfg(test)]
+    pub fn routing_generation(&self) -> u64 {
+        self.route.generation()
+    }
+    #[cfg(test)]
+    pub fn simulate_output_loss(&self) {
+        self.output_failed.store(true, Ordering::SeqCst);
+    }
     pub fn new() -> Result<Self, String> {
         use rodio::cpal::traits::HostTrait;
         let output_failed = Arc::new(AtomicBool::new(false));
@@ -52,11 +61,17 @@ impl AudioPlayer {
                     .ok_or(original)
             })
             .map_err(|e| format!("Impossible d'ouvrir la sortie audio : {e}"))?;
-        let sink = Sink::connect_new(stream.mixer());
+        let route = crate::audio_route::Route::new(
+            stream.config().channel_count(),
+            stream.config().sample_rate(),
+        );
+        route.attach(stream.mixer());
+        let sink = Sink::connect_new(&route.mixer);
         let volume = 0.7;
         sink.set_volume(volume);
         Ok(Self {
             _stream: stream,
+            route,
             sink,
             title: String::new(),
             artist: String::new(),
@@ -79,7 +94,7 @@ impl AudioPlayer {
         let source = Decoder::try_from(file)
             .map_err(|e| format!("Format audio non pris en charge : {e}"))?;
         self.duration = source.total_duration();
-        self.sink = Sink::connect_new(self._stream.mixer());
+        self.sink = Sink::connect_new(&self.route.mixer);
         self.native = None;
         self.quality = None;
         self.loudness_db = None;
@@ -134,9 +149,25 @@ impl AudioPlayer {
         Ok(())
     }
 
+    pub fn follow_default_output(&mut self) -> Result<(), String> {
+        let output_failed = Arc::new(AtomicBool::new(false));
+        let failed = output_failed.clone();
+        let stream = OutputStreamBuilder::from_default_device()
+            .and_then(|builder| {
+                builder
+                    .with_error_callback(move |_| failed.store(true, Ordering::SeqCst))
+                    .open_stream_or_fallback()
+            })
+            .map_err(|_| "La sortie audio par défaut n'est pas encore disponible.".to_owned())?;
+        self.route.attach(stream.mixer());
+        self._stream = stream;
+        self.output_failed = output_failed;
+        Ok(())
+    }
+
     pub fn stop(&mut self) {
         self.loudness_db = None;
-        self.sink = Sink::connect_new(self._stream.mixer());
+        self.sink = Sink::connect_new(&self.route.mixer);
         self.apply_volume();
         self.native = None;
         self.quality = None;
@@ -200,7 +231,7 @@ impl AudioPlayer {
         if !position.is_zero() {
             control.seek(position.min(self.duration.unwrap_or(position)))?;
         }
-        self.sink = Sink::connect_new(self._stream.mixer());
+        self.sink = Sink::connect_new(&self.route.mixer);
         self.native = Some(control);
         self.source_path = None;
         self.apply_volume();
@@ -256,7 +287,7 @@ impl AudioPlayer {
         let source =
             Decoder::try_from(file).map_err(|_| "Impossible de décoder le titre.".to_owned())?;
         self.duration = source.total_duration();
-        self.sink = Sink::connect_new(self._stream.mixer());
+        self.sink = Sink::connect_new(&self.route.mixer);
         self.apply_volume();
         self.sink.append(source);
         self.sink.play();
@@ -282,11 +313,14 @@ impl AudioPlayer {
             .as_ref()
             .is_some_and(|native| native.buffering())
     }
-    pub fn take_error(&self) -> Option<String> {
+    pub fn take_error(&self) -> Option<(String, bool)> {
         if self.output_failed.swap(false, Ordering::SeqCst) {
-            return Some("La sortie audio a été interrompue.".into());
+            return Some(("La sortie audio a été interrompue.".into(), true));
         }
-        self.native.as_ref().and_then(|native| native.take_error())
+        self.native
+            .as_ref()
+            .and_then(|native| native.take_error())
+            .map(|error| (error, false))
     }
 }
 
@@ -302,6 +336,49 @@ fn normalization_gain(enabled: bool, loudness: Option<f32>) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "Sortie Windows muette ; remplace réellement le flux système par le périphérique par défaut sans modifier les réglages Windows."]
+    fn default_output_transfer_preserves_source_metadata_volume_and_pause() {
+        let mut audio = AudioPlayer::new().unwrap();
+        audio.set_volume(0.0);
+        audio.set_normalization(true);
+        audio.set_loudness(Some(6.0));
+        audio.title = "Output transfer test".into();
+        audio.artist = "Tonal".into();
+        audio.cover_url = Some("https://example.com/cover.png".into());
+        audio.duration = Some(Duration::from_secs(10));
+        audio
+            .sink
+            .append(rodio::source::SineWave::new(220.0).take_duration(Duration::from_secs(10)));
+        std::thread::sleep(Duration::from_millis(120));
+        let position = audio.position();
+        assert!(position > Duration::ZERO);
+        audio.follow_default_output().unwrap();
+        assert!(!audio.is_empty() && !audio.is_paused());
+        assert!(audio.position() >= position);
+        std::thread::sleep(Duration::from_millis(120));
+        assert!(audio.position() > position);
+        audio.pause();
+        std::thread::sleep(Duration::from_millis(50));
+        let paused_position = audio.position();
+        audio.follow_default_output().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        assert!(audio.is_paused());
+        assert_eq!(audio.position(), paused_position);
+        assert_eq!(audio.title, "Output transfer test");
+        assert_eq!(audio.artist, "Tonal");
+        assert_eq!(
+            audio.cover_url.as_deref(),
+            Some("https://example.com/cover.png")
+        );
+        assert_eq!(audio.duration, Some(Duration::from_secs(10)));
+        assert_eq!(audio.volume, 0.0);
+        assert!(audio.normalization && audio.loudness_db == Some(6.0));
+        audio.toggle_pause();
+        std::thread::sleep(Duration::from_millis(80));
+        assert!(audio.position() > paused_position);
+        audio.stop();
+    }
     #[test]
     fn normalization_attenuates_loud_tracks_without_boosting_or_changing_user_volume() {
         assert!((normalization_gain(true, Some(6.0)) - 0.5011872).abs() < 0.00001);
